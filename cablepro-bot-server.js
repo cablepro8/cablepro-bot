@@ -1,7 +1,5 @@
 // ===================================================
-// 🤖 CablePro WhatsApp Bot - Green API
-// ===================================================
-// הוראות התקנה במדריך הנפרד
+// 🤖 CablePro WhatsApp Bot - Green API + Poll Buttons
 // ===================================================
 
 const express = require('express');
@@ -9,7 +7,6 @@ const app = express();
 app.use(express.json());
 
 // ──────────── הגדרות Green API ────────────
-// 👇 תחליף את הערכים האלה בערכים שלך מ-Green API
 const ID_INSTANCE = '7107632157';
 const API_TOKEN   = '97af2100fe654e9cb6f9f8674cf0ec36f8fcd5a743914f9381';
 const API_URL     = `https://api.green-api.com/waInstance${ID_INSTANCE}`;
@@ -100,7 +97,6 @@ const LABELS = {
 };
 
 // ──────────── ניהול שיחות ────────────
-// שומר את המצב של כל שיחה לפי מספר טלפון
 const sessions = {};
 
 function getSession(chatId) {
@@ -114,7 +110,7 @@ function resetSession(chatId) {
   sessions[chatId] = { phase: 'greeting', service: null, questionIndex: 0, answers: {} };
 }
 
-// ──────────── שליחת הודעה ────────────
+// ──────────── שליחת הודעת טקסט ────────────
 async function sendMessage(chatId, text) {
   try {
     const response = await fetch(`${API_URL}/sendMessage/${API_TOKEN}`, {
@@ -123,56 +119,84 @@ async function sendMessage(chatId, text) {
       body: JSON.stringify({ chatId, message: text }),
     });
     const data = await response.json();
-    console.log('📤 נשלח ל:', chatId);
+    console.log('📤 טקסט נשלח ל:', chatId);
     return data;
   } catch (err) {
-    console.error('❌ שגיאה בשליחה:', err.message);
+    console.error('❌ שגיאה בשליחת טקסט:', err.message);
   }
 }
 
-// ──────────── הודעת פתיחה ────────────
-function getGreeting() {
-  let msg = `שלום! 👋\nברוכים הבאים ל-*CablePro - מומחים בכבלים*\n\n`;
-  msg += `אנחנו מתמחים בפריסת רשתות כבלים, התקנת מצלמות אבטחה, סידור ארונות תקשורת ועוד.\n\n`;
-  msg += `איך נוכל לעזור לך? *שלח מספר* לבחירת שירות:\n\n`;
-  SERVICES.forEach(s => {
-    msg += `*${s.id}.* ${s.emoji} ${s.name}\n`;
-  });
-  return msg;
+// ──────────── שליחת סקר (כפתורי בחירה) ────────────
+async function sendPoll(chatId, message, options, multipleAnswers = false) {
+  try {
+    const response = await fetch(`${API_URL}/sendPoll/${API_TOKEN}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chatId,
+        message,
+        options: options.map(o => ({ optionName: o })),
+        multipleAnswers,
+      }),
+    });
+    const data = await response.json();
+    console.log('📊 סקר נשלח ל:', chatId);
+    return data;
+  } catch (err) {
+    console.error('❌ שגיאה בשליחת סקר:', err.message);
+  }
+}
+
+// ──────────── שליחת תפריט שירותים כסקר ────────────
+async function sendServiceMenu(chatId) {
+  const options = SERVICES.map(s => `${s.emoji} ${s.name}`);
+  await sendMessage(chatId, `שלום! 👋\nברוכים הבאים ל-*CablePro - מומחים בכבלים*\n\nאנחנו מתמחים בפריסת רשתות כבלים, התקנת מצלמות אבטחה, סידור ארונות תקשורת ועוד.\n\nבחר שירות מהרשימה למטה 👇`);
+
+  // שולח סקר עם כל השירותים
+  await sendPoll(chatId, '🔧 באיזה שירות אתה מעוניין?', options);
+}
+
+// ──────────── זיהוי שירות מתוך תשובת סקר ────────────
+function findServiceFromPollAnswer(answer) {
+  for (const service of SERVICES) {
+    if (answer.includes(service.name) || answer.includes(service.emoji)) {
+      return service;
+    }
+  }
+  // fallback - חיפוש לפי מספר
+  const num = answer.replace(/[^1-7]/g, '');
+  return SERVICES.find(s => s.id === num) || null;
 }
 
 // ──────────── טיפול בהודעה נכנסת ────────────
-async function handleMessage(chatId, text) {
+async function handleMessage(chatId, text, msgType) {
   const session = getSession(chatId);
   const input = text.trim();
 
   // פקודת אתחול
   if (input === '0' || input === 'תפריט' || input === 'menu') {
     resetSession(chatId);
-    await sendMessage(chatId, getGreeting());
+    await sendServiceMenu(chatId);
     return;
   }
 
   // ──── שלב 1: הודעת פתיחה ────
   if (session.phase === 'greeting') {
-    // בדיקה אם הלקוח שלח מספר שירות
-    const serviceId = input.replace(/[^1-7]/g, '');
-    const service = SERVICES.find(s => s.id === serviceId);
+    const service = findServiceFromPollAnswer(input);
 
     if (service) {
-      session.service = serviceId;
+      session.service = service.id;
       session.phase = 'questions';
       session.questionIndex = 0;
       session.answers = {};
 
-      const questions = QUESTIONS[serviceId];
+      const questions = QUESTIONS[service.id];
       let msg = `בחרת: *${service.name}* ✅\n\n`;
       msg += `מעולה! כדי שנוכל לחזור אליך עם הצעת מחיר, אני צריך כמה פרטים.\n\n`;
       msg += questions[0].text;
       await sendMessage(chatId, msg);
     } else {
-      // שלח את התפריט
-      await sendMessage(chatId, getGreeting());
+      await sendServiceMenu(chatId);
     }
     return;
   }
@@ -182,11 +206,9 @@ async function handleMessage(chatId, text) {
     const questions = QUESTIONS[session.service];
     const currentQ = questions[session.questionIndex];
 
-    // שמירת תשובה
     session.answers[currentQ.key] = input;
     session.questionIndex++;
 
-    // עוד שאלות?
     if (session.questionIndex < questions.length) {
       await sendMessage(chatId, questions[session.questionIndex].text);
     } else {
@@ -211,40 +233,51 @@ async function handleMessage(chatId, text) {
       summary += `\n✅ _הפניה נשלחה לצוות CablePro ונחזור אליכם בהקדם האפשרי_`;
       await sendMessage(chatId, summary);
 
-      // 👇 כאן אפשר להוסיף שליחת הסיכום אליך (לבעל העסק)
+      // 👇 הפעל את השורה הזו כדי לקבל כל פניה ישירות לוואטסאפ שלך
       // await sendMessage('972549811154@c.us', `📩 פניה חדשה!\n\n${summary}`);
 
-      // אתחול לשיחה הבאה
       resetSession(chatId);
     }
     return;
   }
 
-  // אם השיחה הסתיימה והלקוח שלח עוד הודעה
+  // אם השיחה הסתיימה
   if (session.phase === 'done') {
     resetSession(chatId);
-    await sendMessage(chatId, getGreeting());
+    await sendServiceMenu(chatId);
   }
 }
 
-// ──────────── Webhook - קבלת הודעות ────────────
+// ──────────── Webhook ────────────
 app.post('/webhook', async (req, res) => {
   try {
     const body = req.body;
 
-    // רק הודעות נכנסות
     if (body.typeWebhook === 'incomingMessageReceived') {
       const chatId = body.senderData?.chatId;
       const msgType = body.messageData?.typeMessage;
 
-      // רק הודעות טקסט
+      // הודעת טקסט רגילה
       if (msgType === 'textMessage' && chatId) {
         const text = body.messageData.textMessageData.textMessage;
         console.log(`📩 הודעה מ-${chatId}: ${text}`);
-        await handleMessage(chatId, text);
-      } else if (chatId) {
-        // הודעה שהיא לא טקסט
-        await sendMessage(chatId, 'סליחה, אני יכול לקבל רק הודעות טקסט כרגע 😊\nשלח מספר כדי לבחור שירות.');
+        await handleMessage(chatId, text, msgType);
+      }
+      // תשובה לסקר (לחיצה על כפתור)
+      else if (msgType === 'pollUpdateMessage' && chatId) {
+        const pollData = body.messageData.pollMessageData;
+        if (pollData && pollData.votes) {
+          // מוצא את האפשרות שנבחרה
+          const selectedOption = pollData.votes.find(v => v.optionVoters && v.optionVoters.length > 0);
+          if (selectedOption) {
+            console.log(`📊 בחירה בסקר מ-${chatId}: ${selectedOption.optionName}`);
+            await handleMessage(chatId, selectedOption.optionName, 'pollUpdate');
+          }
+        }
+      }
+      // הודעה שהיא לא טקסט ולא סקר
+      else if (chatId && msgType !== 'pollUpdateMessage') {
+        await sendMessage(chatId, 'סליחה, אני יכול לקבל רק הודעות טקסט כרגע 😊\nשלח "תפריט" כדי להתחיל.');
       }
     }
 
@@ -268,5 +301,4 @@ app.get('/health', (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 CablePro Bot running on port ${PORT}`);
-  console.log(`📡 Webhook URL: https://YOUR-APP.onrender.com/webhook`);
 });
