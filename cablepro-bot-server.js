@@ -168,6 +168,14 @@ function findServiceFromPollAnswer(answer) {
   return SERVICES.find(s => s.id === num) || null;
 }
 
+// ──────────── מילות הפעלה ────────────
+const TRIGGER_WORDS = ['שלום', 'היי', 'הי', 'תפריט', 'menu', 'שירות', 'שירותים', 'מחירון', 'בוקר טוב', 'ערב טוב', 'הזמנה', 'start', 'hello', 'hi', '0'];
+
+function isTriggerWord(text) {
+  const lower = text.toLowerCase().trim();
+  return TRIGGER_WORDS.some(w => lower === w || lower.includes(w));
+}
+
 // ──────────── טיפול בהודעה נכנסת ────────────
 async function handleMessage(chatId, text, msgType) {
   const session = getSession(chatId);
@@ -182,6 +190,7 @@ async function handleMessage(chatId, text, msgType) {
 
   // ──── שלב 1: הודעת פתיחה ────
   if (session.phase === 'greeting') {
+    // בדיקה אם הלקוח בחר שירות מהסקר
     const service = findServiceFromPollAnswer(input);
 
     if (service) {
@@ -195,9 +204,11 @@ async function handleMessage(chatId, text, msgType) {
       msg += `מעולה! כדי שנוכל לחזור אליך עם הצעת מחיר, אני צריך כמה פרטים.\n\n`;
       msg += questions[0].text;
       await sendMessage(chatId, msg);
-    } else {
+    } else if (isTriggerWord(input)) {
+      // רק אם הלקוח שלח מילת הפעלה - שלח תפריט
       await sendServiceMenu(chatId);
     }
+    // אם זו הודעה רגילה בלי מילת הפעלה - הבוט לא מגיב (שיחה רגילה)
     return;
   }
 
@@ -241,10 +252,13 @@ async function handleMessage(chatId, text, msgType) {
     return;
   }
 
-  // אם השיחה הסתיימה
+  // אם השיחה הסתיימה והלקוח שלח עוד הודעה
   if (session.phase === 'done') {
-    resetSession(chatId);
-    await sendServiceMenu(chatId);
+    if (isTriggerWord(input)) {
+      resetSession(chatId);
+      await sendServiceMenu(chatId);
+    }
+    // אחרת - לא מגיב, זו שיחה רגילה ביניכם
   }
 }
 
